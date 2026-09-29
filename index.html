@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Innehalten">
+  <meta name="theme-color" content="#FAF1EC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1F1820" media="(prefers-color-scheme: dark)">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Innehalten</title>
+</head>
+<body>
+  <div id="app">
+    <main id="view" class="view" tabindex="-1"></main>
+
+    <nav class="tabbar" aria-label="Hauptnavigation">
+      <button class="tab" data-act="tab" data-tab="today"><span class="tab-ico" data-icon="tabToday"></span><span>Heute</span></button>
+      <button class="tab" data-act="tab" data-tab="library"><span class="tab-ico" data-icon="tabLib"></span><span>Bibliothek</span></button>
+      <button class="tab" data-act="tab" data-tab="timer"><span class="tab-ico" data-icon="tabTimer"></span><span>Stille</span></button>
+      <button class="tab" data-act="tab" data-tab="progress"><span class="tab-ico" data-icon="tabProg"></span><span>Fortschritt</span></button>
+    </nav>
+  </div>
+
+  <!-- Vollbild-Player (Audio-Übungen und Stille-Timer) -->
+  <section id="player" class="player" aria-label="Player" aria-hidden="true">
+    <div class="player-top">
+      <button class="icon-btn" data-act="p-close" aria-label="Player schließen"><span data-icon="down"></span></button>
+      <span class="player-cat" id="p-cat"></span>
+      <span class="icon-btn-spacer"></span>
+    </div>
+
+    <div class="player-art">
+      <div class="orb" aria-hidden="true">
+        <span></span><span></span><span></span>
+        <div class="orb-label" id="p-big"></div>
+      </div>
+    </div>
+
+    <div class="player-info">
+      <h2 id="p-title"></h2>
+      <p id="p-desc"></p>
+      <p class="p-badge" id="p-badge"><span data-icon="check"></span> Als erledigt gezählt</p>
+      <p class="p-resume" id="p-resume">Fortgesetzt bei <span id="p-resume-at"></span>. <button data-act="p-restart">Von vorn beginnen</button></p>
+    </div>
+
+    <div class="player-progress">
+      <input id="p-seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Position">
+      <div class="times"><span id="p-elapsed">0:00</span><span id="p-remaining">−0:00</span></div>
+    </div>
+
+    <div class="controls">
+      <button class="ctl ctl-skip" data-act="p-back" aria-label="15 Sekunden zurück"><span data-icon="back15"></span></button>
+      <button class="ctl-main" data-act="p-toggle" aria-label="Abspielen oder pausieren"><span class="i-play" data-icon="play"></span><span class="i-pause" data-icon="pause"></span></button>
+      <button class="ctl ctl-skip" data-act="p-fwd" aria-label="15 Sekunden vor"><span data-icon="fwd15"></span></button>
+    </div>
+  </section>
+
+  <div id="backdrop" class="backdrop" data-act="sheet-close"></div>
+  <section id="sheet" class="sheet" role="dialog" aria-modal="true"></section>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+  <audio id="audio" preload="metadata" playsinline></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>

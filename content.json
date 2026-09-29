@@ -1,0 +1,27 @@
+{
+  "_hinweis": "Beispielinhalte. Ersetze sie durch deine eigenen Aufnahmen. Dauer: \"mm:ss\" oder eine Zahl in Minuten. tags (optional): morgen, tag, abend, nacht.",
+  "categories": [
+    { "id": "achtsamkeit", "title": "Achtsamkeit", "color": "sage", "icon": "leaf" },
+    { "id": "ruhe", "title": "Stress und Ruhe", "color": "rose", "icon": "wave" },
+    { "id": "schlaf", "title": "Schlaf", "color": "peri", "icon": "moon" },
+    { "id": "morgen", "title": "Morgen", "color": "marigold", "icon": "sun" }
+  ],
+  "courses": [
+    {
+      "id": "ankommen",
+      "title": "Ankommen (Demo)",
+      "category": "achtsamkeit",
+      "description": "Ein Beispielkurs in drei Einheiten. Hier kommt später dein erster Kurs hin.",
+      "sessions": [
+        { "id": "ankommen-01", "title": "Tag 1: Den Atem finden", "file": "audio/demo/klangprobe.mp3", "duration": "1:00", "description": "Erste Einheit des Beispielkurses." },
+        { "id": "ankommen-02", "title": "Tag 2: Den Körper spüren", "file": "audio/demo/klangprobe.mp3", "duration": "1:00" },
+        { "id": "ankommen-03", "title": "Tag 3: Gedanken ziehen lassen", "file": "audio/demo/klangprobe.mp3", "duration": "1:00" }
+      ]
+    }
+  ],
+  "singles": [
+    { "id": "guter-start", "title": "Guter Start (Demo)", "category": "morgen", "file": "audio/demo/klangprobe.mp3", "duration": "1:00", "description": "Eine kurze Einstimmung auf den Tag.", "tags": ["morgen"] },
+    { "id": "atempause", "title": "Kurze Atempause (Demo)", "category": "ruhe", "file": "audio/demo/klangprobe.mp3", "duration": "1:00", "description": "Für angespannte Momente zwischendurch.", "tags": ["tag"] },
+    { "id": "einschlafen", "title": "Sanft einschlafen (Demo)", "category": "schlaf", "file": "audio/demo/klangprobe.mp3", "duration": "1:00", "description": "Loslassen und ruhig werden vor dem Schlafen.", "tags": ["abend", "nacht"] }
+  ]
+}

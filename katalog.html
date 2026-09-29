@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <title>Innehalten – Katalog erstellen</title>
+  <style>
+    body { overflow: auto; -webkit-user-select: text; user-select: text; }
+    .tool { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; display: flex; flex-direction: column; gap: 18px; }
+    input[type="file"] { font-size: 15px; }
+    .progress { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+    .progress i { display: block; height: 100%; width: 0; background: var(--sage); transition: width .2s; }
+    .tree { font-size: 15px; line-height: 1.6; }
+    .tree h3 { margin-top: 14px; }
+    .tree ul { margin: 4px 0 0; padding-left: 20px; }
+    .warn { color: var(--rose); font-weight: 600; }
+    code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; font-size: 14px; }
+    .mode { display: flex; gap: 8px; }
+    [data-mode-panel][hidden] { display: none; }
+  </style>
+</head>
+<body>
+<main class="tool">
+  <header class="page-head">
+    <h1>Katalog erstellen</h1>
+    <p class="muted">Erstellt die <code>content.json</code> aus deinem Aufnahme-Ordner. Der Ordner muss „Packs“ und „Singles“ enthalten.</p>
+  </header>
+
+  <div class="mode" role="tablist">
+    <button class="chip active" data-mode="drive">Aus Google Drive</button>
+    <button class="chip" data-mode="local">Aus Ordner auf dem Computer</button>
+  </div>
+
+  <section class="card settings" data-mode-panel="drive">
+    <div class="field">
+      <label for="folder">1. Link zum Drive-Ordner</label>
+      <input id="folder" class="text-input" type="text" placeholder="https://drive.google.com/drive/folders/…" spellcheck="false">
+      <p class="hint">Der Ordner muss auf „Jeder mit dem Link: Betrachter“ freigegeben sein.</p>
+    </div>
+    <div class="field">
+      <label for="key">2. API-Schlüssel</label>
+      <input id="key" class="text-input" type="text" placeholder="AIza…" spellcheck="false" autocomplete="off">
+      <p class="hint">Wie du den Schlüssel bekommst, steht in der README unter „Audios aus Google Drive“.</p>
+    </div>
+  </section>
+
+  <section class="card settings" data-mode-panel="local" hidden>
+    <div class="field">
+      <label for="dir">1. Ordner wählen</label>
+      <input id="dir" type="file" webkitdirectory directory multiple>
+      <p class="hint">Die Dateien werden nur hier im Browser gelesen.</p>
+    </div>
+    <div class="field">
+      <label for="base">2. Wo liegen die Audios später?</label>
+      <input id="base" class="text-input" type="text" value="audio/" spellcheck="false">
+      <p class="hint">Standard ist der Ordner <code>audio/</code> neben der App, oder die Adresse eines externen Speichers.</p>
+    </div>
+  </section>
+
+  <section class="card settings">
+    <div class="field">
+      <label for="old">Bisherige content.json (optional)</label>
+      <input id="old" type="file" accept=".json,application/json">
+      <p class="hint">Damit bleiben Titel, Beschreibungen, Farben und Tags erhalten, die du selbst angepasst hast.</p>
+    </div>
+    <button id="go" class="btn primary block">content.json erstellen</button>
+  </section>
+
+  <section id="out" class="card settings" hidden>
+    <h2 id="status">Starte …</h2>
+    <div class="progress"><i id="bar"></i></div>
+    <div id="summary"></div>
+    <button id="dl" class="btn primary block" hidden>content.json herunterladen</button>
+    <div id="tree" class="tree"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+const AUDIO = /\.(mp3|m4a|aac|wav|ogg|opus)$/i;
+const IGNORE = /^(\.ds_store|desktop\.ini|thumbs\.db|icon\r?)$/i;
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const strip = s => s.replace(/^\s*\d+\s*[-–.]\s*/, '').trim();
+const orderOf = s => { const m = /^\s*(\d+)\s*[-–.]/.exec(s); return m ? +m[1] : 999; };
+const slug = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').replace(/&/g, ' und ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
+const natural = (a, b) => a.localeCompare(b, 'de', { numeric: true, sensitivity: 'base' });
+const fmtDur = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+const fmtSize = b => b > 1e9 ? `${(b / 1e9).toFixed(1).replace('.', ',')} GB` : `${Math.round(b / 1e6)} MB`;
+const store = { get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* */ } } };
+
+const STYLE = [
+  [/foundation|basic|grundlag/i, 'sage', 'leaf'], [/brave|mut/i, 'rose', 'heart'], [/health|gesund/i, 'sky', 'drop'],
+  [/happi|glück|freude/i, 'marigold', 'sun'], [/work|performance|arbeit|fokus|focus/i, 'sand', 'stone'],
+  [/student|studi|lern/i, 'peri', 'wind'], [/sport/i, 'sky', 'wave'], [/\bpro\b|advanced|fortgeschritten/i, 'peri', 'circle'],
+  [/sos|notfall|panic/i, 'rose', 'wave'], [/sleep|schlaf|night|nacht|dream|traum/i, 'peri', 'moon'],
+  [/walk|gehen/i, 'sage', 'leaf'], [/travel|reise/i, 'sky', 'wind'], [/morning|morgen|wake/i, 'marigold', 'sun'],
+];
+const PALETTE = ['sage', 'peri', 'marigold', 'rose', 'sky', 'sand'];
+const ICONS = ['leaf', 'moon', 'sun', 'wave', 'drop', 'heart', 'wind', 'stone', 'circle'];
+function styleFor(title, i) {
+  const hit = STYLE.find(([re]) => re.test(title));
+  return hit ? { color: hit[1], icon: hit[2] } : { color: PALETTE[i % PALETTE.length], icon: ICONS[i % ICONS.length] };
+}
+function tagsFor(text) {
+  if (/sleep|schlaf|night|nacht|dream|traum|bed|abend/i.test(text)) return ['abend', 'nacht'];
+  if (/morning|morgen|wake|aufwach|start/i.test(text)) return ['morgen'];
+  return ['tag'];
+}
+const minutesHint = name => { const m = /(\d+)\s*(?:min|minuten|minutes)\b/i.exec(name); return m ? +m[1] * 60 : 0; };
+
+/* ---------- Oberfläche ---------- */
+let mode = store.get('katalog-mode') || 'drive';
+function setMode(m) {
+  mode = m; store.set('katalog-mode', m);
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  document.querySelectorAll('[data-mode-panel]').forEach(p => { p.hidden = p.dataset.modePanel !== m; });
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+setMode(mode);
+$('#folder').value = store.get('katalog-folder');
+$('#key').value = store.get('katalog-key');
+
+let oldContent = null;
+$('#old').addEventListener('change', async e => {
+  try { oldContent = JSON.parse(await e.target.files[0].text()); } catch { oldContent = null; alert('Diese content.json konnte nicht gelesen werden und wird ignoriert.'); }
+});
+$('#go').addEventListener('click', () => run().catch(err => {
+  $('#status').textContent = 'Das hat nicht geklappt';
+  $('#summary').innerHTML = `<p class="warn">${esc(err.message)}</p>`;
+  $('#go').disabled = false;
+}));
+
+function progress(text, frac) {
+  $('#status').textContent = text;
+  if (frac != null) $('#bar').style.width = `${Math.round(frac * 100)}%`;
+}
+
+/* ---------- Dauer messen ---------- */
+function measure(src) {
+  return new Promise(res => {
+    const a = new Audio();
+    const url = typeof src === 'string' ? src : URL.createObjectURL(src);
+    let finished = false;
+    const done = v => {
+      if (finished) return; finished = true;
+      if (typeof src !== 'string') URL.revokeObjectURL(url);
+      a.removeAttribute('src'); a.load(); res(v);
+    };
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => done(isFinite(a.duration) ? Math.round(a.duration) : 0);
+    a.onerror = () => done(0);
+    setTimeout(() => done(0), 25000);
+    a.src = url;
+  });
+}
+
+/* ---------- Google Drive ---------- */
+function folderIdFrom(s) {
+  s = s.trim();
+  const m = /\/folders\/([\w-]{10,})/.exec(s) || /[?&]id=([\w-]{10,})/.exec(s);
+  if (m) return m[1];
+  if (/^[\w-]{10,}$/.test(s)) return s;
+  return null;
+}
+async function driveError(r) {
+  let msg = '';
+  try { const j = await r.json(); msg = j.error && j.error.message || ''; } catch { /* */ }
+  if (/API key not valid/i.test(msg)) return new Error('Der API-Schlüssel ist ungültig. Bitte prüfen, ob er vollständig kopiert wurde.');
+  if (/has not been used|is disabled/i.test(msg)) return new Error('Die Google Drive API ist für diesen Schlüssel noch nicht aktiviert. In der Google Cloud Console unter „APIs und Dienste“ die „Google Drive API“ aktivieren und einige Minuten warten.');
+  if (/referer|referrer/i.test(msg)) return new Error(`Der Schlüssel ist für diese Adresse gesperrt (${location.origin}). Füge sie bei den Website-Einschränkungen des Schlüssels hinzu.`);
+  if (r.status === 404) return new Error('Der Ordner wurde nicht gefunden. Ist er auf „Jeder mit dem Link“ freigegeben?');
+  return new Error(`Google Drive meldet einen Fehler (${r.status}): ${msg || 'unbekannt'}`);
+}
+async function listChildren(id, key) {
+  const out = [];
+  let token = '';
+  do {
+    const p = new URLSearchParams({
+      q: `'${id}' in parents and trashed = false`,
+      fields: 'nextPageToken,files(id,name,mimeType,size,resourceKey)',
+      pageSize: '1000', key, supportsAllDrives: 'true', includeItemsFromAllDrives: 'true',
+    });
+    if (token) p.set('pageToken', token);
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?${p}`);
+    if (!r.ok) throw await driveError(r);
+    const j = await r.json();
+    out.push(...(j.files || []));
+    token = j.nextPageToken;
+  } while (token);
+  return out;
+}
+async function collectDrive() {
+  const folderId = folderIdFrom($('#folder').value);
+  const key = $('#key').value.trim();
+  if (!folderId) throw new Error('Bitte einen gültigen Link zu einem Drive-Ordner eintragen.');
+  if (!key) throw new Error('Bitte den API-Schlüssel eintragen.');
+  store.set('katalog-folder', $('#folder').value.trim()); store.set('katalog-key', key);
+
+  const entries = [], skipped = [];
+  let folders = 0, withResourceKey = 0;
+  const queue = [{ id: folderId, path: [] }];
+  while (queue.length) {
+    const { id, path } = queue.shift();
+    folders++;
+    progress(`Lese Ordner … ${folders} gelesen, ${entries.length} Audios gefunden`, null);
+    const kids = await listChildren(id, key);
+    for (const k of kids) {
+      if (k.mimeType === FOLDER_MIME) { queue.push({ id: k.id, path: [...path, k.name] }); continue; }
+      if (AUDIO.test(k.name) || (k.mimeType || '').startsWith('audio/')) {
+        if (k.resourceKey) withResourceKey++;
+        entries.push({ parts: path, fileName: k.name, size: +k.size || 0, url: `https://www.googleapis.com/drive/v3/files/${k.id}?alt=media&key=${encodeURIComponent(key)}` });
+      } else if (!IGNORE.test(k.name)) skipped.push(k.name);
+    }
+  }
+  if (folders === 1 && !entries.length) throw new Error('Im Ordner wurden keine Audios gefunden. Ist er auf „Jeder mit dem Link“ freigegeben und enthält er „Packs“ und „Singles“?');
+  return { entries, skipped, extra: withResourceKey ? `<p class="warn">${withResourceKey} Dateien verwenden einen alten Freigabeschlüssel und spielen eventuell nicht ab. Abhilfe: Freigabe des Ordners einmal auf „Eingeschränkt“ und wieder auf „Jeder mit dem Link“ stellen.</p>` : '' };
+}
+
+/* ---------- Lokaler Ordner ---------- */
+function collectLocal() {
+  const all = [...$('#dir').files];
+  if (!all.length) throw new Error('Bitte zuerst einen Ordner wählen.');
+  let base = $('#base').value.trim() || 'audio/';
+  if (!base.endsWith('/')) base += '/';
+  const entries = [], skipped = [];
+  for (const f of all) {
+    if (!AUDIO.test(f.name)) { if (!IGNORE.test(f.name)) skipped.push(f.name); continue; }
+    const parts = (f.webkitRelativePath || f.name).split('/');
+    if (parts.length > 1) parts.shift();
+    const fileName = parts.pop();
+    entries.push({ parts, fileName, size: f.size, file: f, url: base + [...parts, fileName].map(encodeURIComponent).join('/') });
+  }
+  const total = entries.reduce((a, e) => a + e.size, 0);
+  const extra = total > 1e9 && base === 'audio/' ? `<p class="warn">Deine Audios sind zusammen ${fmtSize(total)} groß. GitHub Pages erlaubt nur etwa 1 GB. Nutze besser den Drive-Modus.</p>` : '';
+  return { entries, skipped, extra };
+}
+
+/* ---------- Katalog bauen ---------- */
+async function run() {
+  $('#go').disabled = true;
+  $('#out').hidden = false; $('#dl').hidden = true;
+  $('#tree').innerHTML = ''; $('#summary').innerHTML = ''; $('#bar').style.width = '0';
+
+  const { entries, skipped, extra } = mode === 'drive' ? await collectDrive() : collectLocal();
+
+  // Laufzeiten messen (6 gleichzeitig)
+  let doneCount = 0, idx = 0;
+  const worker = async () => {
+    while (idx < entries.length) {
+      const e = entries[idx++];
+      e.duration = (await measure(e.file || e.url)) || minutesHint(e.fileName);
+      doneCount++;
+      progress(`Messe Laufzeiten … ${doneCount} von ${entries.length}`, doneCount / entries.length);
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+
+  const cats = new Map(), courses = new Map(), singles = [], usedIds = new Set();
+  const uniq = id => { let u = id, n = 2; while (usedIds.has(u)) u = `${id}-${n++}`; usedIds.add(u); return u; };
+
+  for (const e of entries) {
+    const parts = e.parts;
+    const baseName = e.fileName.replace(/\.[^.]+$/, '');
+    const top = parts[0] || '';
+    const isPack = /pack|kurs|course|serie/i.test(top);
+    const catFolder = parts.length >= 2 ? parts[1] : (parts[0] || 'Weitere');
+    const group = parts.length >= 2 && isPack ? 'Kurse' : 'Einzelübungen';
+    const catKey = `${group}/${catFolder}`;
+    if (!cats.has(catKey)) {
+      const title = strip(catFolder);
+      cats.set(catKey, { id: `${group === 'Kurse' ? 'k' : 'e'}-${slug(title)}`, title, group, order: orderOf(catFolder) });
+    }
+    const cat = cats.get(catKey);
+    const rest = parts.slice(2);
+
+    if (isPack && rest.length) {
+      const cKey = `${catKey}/${rest.join('/')}`;
+      if (!courses.has(cKey)) {
+        let title = rest.map(strip).join(' – ');
+        if (/^(level|stufe|teil|part)\s*\d+$/i.test(title)) title = `${cat.title} ${title}`;
+        courses.set(cKey, { id: `${cat.id.slice(2)}-${slug(rest.map(strip).join('-'))}`, title, category: cat.id, order: orderOf(rest[0]), folder: rest.join('/'), units: [] });
+      }
+      const course = courses.get(cKey);
+      const day = /\b(?:day|tag|session|einheit)\s*(\d+)/i.exec(baseName);
+      let title, sortKey = null;
+      if (day) { title = `Tag ${+day[1]}`; sortKey = +day[1]; }
+      else {
+        title = baseName.replace(/^meditation\s*[-–]\s*/i, '').replace(/\s*\d+\s*min\b.*$/i, '').trim();
+        const bare = course.title.replace(/^.*–\s*/, '');
+        if (title.toLowerCase().startsWith(bare.toLowerCase())) title = title.slice(bare.length).replace(/^\s*[-–]\s*/, '') || baseName;
+        if (/intro/i.test(baseName)) sortKey = -1;
+      }
+      course.units.push({ title, file: e.url, duration: e.duration, sortKey, name: baseName });
+    } else {
+      let title = baseName.replace(/^(single|meditation)\s*[-–]\s*/i, '').replace(/\s*\(?\d+\s*(min|minuten|minutes)\)?\s*$/i, '');
+      title = strip(title) || baseName;
+      const sub = rest.map(strip).join(' ');
+      singles.push({
+        id: `${cat.id.slice(2)}-${slug((sub ? sub + '-' : '') + title)}`,
+        title: sub && !title.toLowerCase().includes(sub.toLowerCase()) ? `${title} (${sub})` : title,
+        category: cat.id, file: e.url, duration: e.duration, tags: tagsFor(`${cat.title} ${sub} ${title}`),
+      });
+    }
+  }
+
+  // Eigene Anpassungen aus der alten content.json übernehmen
+  const oldCats = new Map((oldContent?.categories || []).map(c => [c.id, c]));
+  const oldCourses = new Map((oldContent?.courses || []).map(c => [c.id, c]));
+  const oldEx = new Map([...(oldContent?.singles || []), ...(oldContent?.courses || []).flatMap(c => c.sessions || [])].map(e => [e.id, e]));
+
+  const catList = [...cats.values()].sort((a, b) => (a.group === b.group ? 0 : a.group === 'Kurse' ? -1 : 1) || a.order - b.order || natural(a.title, b.title));
+  const outCats = catList.map((c, i) => {
+    const o = oldCats.get(c.id) || {};
+    const st = styleFor(c.title, i);
+    return { id: c.id, title: o.title || c.title, group: c.group, color: o.color || st.color, icon: o.icon || st.icon, ...(o.description ? { description: o.description } : {}) };
+  });
+  const catOrder = new Map(outCats.map((c, i) => [c.id, i]));
+
+  const outCourses = [...courses.values()]
+    .sort((a, b) => catOrder.get(a.category) - catOrder.get(b.category) || a.order - b.order || natural(a.folder, b.folder))
+    .map(c => {
+      const o = oldCourses.get(c.id) || {};
+      c.units.sort((a, b) => (a.sortKey ?? 1e6) - (b.sortKey ?? 1e6) || natural(a.name, b.name));
+      const seen = new Set();
+      return {
+        id: uniq(c.id), title: o.title || c.title, category: c.category, description: o.description || '',
+        sessions: c.units.map(u => {
+          let id = `${c.id}-${u.sortKey > 0 ? String(u.sortKey).padStart(2, '0') : slug(u.title)}`;
+          while (seen.has(id)) id += '-b';
+          seen.add(id); id = uniq(id);
+          const ou = oldEx.get(id) || {};
+          return { id, title: ou.title || u.title, file: u.file, duration: fmtDur(u.duration), ...(ou.description ? { description: ou.description } : {}) };
+        }),
+      };
+    });
+  const outSingles = singles
+    .sort((a, b) => catOrder.get(a.category) - catOrder.get(b.category) || natural(a.title, b.title))
+    .map(s => {
+      const id = uniq(s.id);
+      const o = oldEx.get(id) || {};
+      return { id, title: o.title || s.title, category: s.category, file: s.file, duration: fmtDur(s.duration), ...(o.description ? { description: o.description } : {}), tags: o.tags || s.tags };
+    });
+
+  const content = {
+    _hinweis: 'Erstellt mit katalog.html. Titel, Beschreibungen, Farben und Tags darfst du frei anpassen. Die ids bitte nicht ändern, daran hängt dein Fortschritt.',
+    categories: outCats, courses: outCourses, singles: outSingles,
+  };
+
+  // Zusammenfassung
+  const total = entries.reduce((a, e) => a + e.size, 0);
+  const noDur = entries.filter(e => !e.duration).length;
+  const units = outCourses.reduce((a, c) => a + c.sessions.length, 0);
+  const hours = Math.round(entries.reduce((a, e) => a + (e.duration || 0), 0) / 3600);
+  let notes = extra;
+  if (noDur) notes += `<p class="hint">Bei ${noDur} Dateien konnte die Dauer nicht gelesen werden. Die App ermittelt sie beim ersten Abspielen selbst.${mode === 'drive' && noDur === entries.length ? ' Da es bei keiner Datei geklappt hat, blockiert vermutlich die Website-Einschränkung des API-Schlüssels die Abrufe.' : ''}</p>`;
+  if (skipped.length) notes += `<p class="hint">Übersprungen (kein Audio): ${skipped.slice(0, 5).map(esc).join(', ')}${skipped.length > 5 ? ` und ${skipped.length - 5} weitere` : ''}.</p>`;
+  progress('Fertig', 1);
+  $('#summary').innerHTML = `<p>${outCats.length} Kategorien, ${outCourses.length} Kurse mit ${units} Einheiten, ${outSingles.length} Einzelübungen. Insgesamt ${fmtSize(total)} und rund ${hours} Stunden Audio.</p>${notes}`;
+
+  $('#tree').innerHTML = outCats.map(c => {
+    const cs = outCourses.filter(x => x.category === c.id), ss = outSingles.filter(x => x.category === c.id);
+    return `<h3>${esc(c.group)}: ${esc(c.title)}</h3><ul>${cs.map(x => `<li>${esc(x.title)} (${x.sessions.length} Einheiten)</li>`).join('')}${ss.map(x => `<li>${esc(x.title)}, ${x.duration}</li>`).join('')}</ul>`;
+  }).join('');
+
+  const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
+  $('#dl').hidden = false;
+  $('#dl').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'content.json';
+    document.body.append(a); a.click(); a.remove();
+  };
+  $('#go').disabled = false;
+}
+</script>
+</body>
+</html>
