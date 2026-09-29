@@ -170,8 +170,13 @@ async function driveError(r) {
   try { const j = await r.json(); msg = j.error && j.error.message || ''; } catch { /* */ }
   if (/API key not valid/i.test(msg)) return new Error('Der API-Schlüssel ist ungültig. Bitte prüfen, ob er vollständig kopiert wurde.');
   if (/has not been used|is disabled/i.test(msg)) return new Error('Die Google Drive API ist für diesen Schlüssel noch nicht aktiviert. In der Google Cloud Console unter „APIs und Dienste“ die „Google Drive API“ aktivieren und einige Minuten warten.');
-  if (/referer|referrer/i.test(msg)) return new Error(`Der Schlüssel ist für diese Adresse gesperrt (${location.origin}). Füge sie bei den Website-Einschränkungen des Schlüssels hinzu.`);
-  if (r.status === 404) return new Error('Der Ordner wurde nicht gefunden. Ist er auf „Jeder mit dem Link“ freigegeben?');
+  if (/referer|referrer/i.test(msg)) {
+    if (location.protocol === 'file:') return new Error('Diese Seite ist direkt vom Computer geöffnet. Dein API-Schlüssel funktioniert nur auf deiner Website. Öffne katalog.html bitte über deine GitHub-Adresse, z. B. https://DEINNAME.github.io/Innehalten/katalog.html');
+    return new Error(`Der Schlüssel ist für diese Adresse gesperrt (${location.origin}). Füge sie bei den Website-Einschränkungen des Schlüssels hinzu.`);
+  }
+  if (/cannotDownload|download/i.test(msg)) return new Error('Google Drive erlaubt das Herunterladen nicht. Öffne in Drive die Freigabe des Ordners → Zahnrad oben rechts → „Betrachter und Kommentatoren können die Option zum Herunterladen, Drucken und Kopieren sehen“ muss angehakt sein.');
+  if (/quota|rate|limit/i.test(msg)) return new Error('Google Drive drosselt gerade die Abrufe. Bitte in einer Weile erneut versuchen.');
+  if (r.status === 404) return new Error('Der Ordner oder die Datei wurde nicht gefunden. Ist der Ordner auf „Jeder mit dem Link“ freigegeben?');
   return new Error(`Google Drive meldet einen Fehler (${r.status}): ${msg || 'unbekannt'}`);
 }
 async function listChildren(id, key) {
@@ -216,6 +221,16 @@ async function collectDrive() {
     }
   }
   if (folders === 1 && !entries.length) throw new Error('Im Ordner wurden keine Audios gefunden. Ist er auf „Jeder mit dem Link“ freigegeben und enthält er „Packs“ und „Singles“?');
+
+  // Probe: Lässt sich eine Audiodatei wirklich abrufen? (so wie später die App)
+  progress('Teste den Abruf einer Audiodatei …', null);
+  const probe = await fetch(entries[0].url, { headers: { Range: 'bytes=0-1' } }).catch(() => null);
+  if (!probe) throw new Error('Die Probedatei konnte nicht abgerufen werden (Netzwerkfehler). Bitte Internetverbindung prüfen und erneut versuchen.');
+  if (!probe.ok) {
+    const e = await driveError(probe);
+    e.message = `Die Ordner lassen sich lesen, aber die Audiodatei „${entries[0].fileName}“ lässt sich nicht abrufen. ${e.message}`;
+    throw e;
+  }
   return { entries, skipped, extra: withResourceKey ? `<p class="warn">${withResourceKey} Dateien verwenden einen alten Freigabeschlüssel und spielen eventuell nicht ab. Abhilfe: Freigabe des Ordners einmal auf „Eingeschränkt“ und wieder auf „Jeder mit dem Link“ stellen.</p>` : '' };
 }
 

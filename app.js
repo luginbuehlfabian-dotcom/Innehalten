@@ -662,11 +662,12 @@ function daySheet(k) {
 
 /* ---------- Toast ---------- */
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 2800) {
   const t = $('#toast');
   t.textContent = msg; t.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
+$('#toast').addEventListener('click', () => $('#toast').classList.remove('show'));
 
 /* ---------- Offline-Audio ---------- */
 async function refreshCached() {
@@ -888,12 +889,37 @@ audio.addEventListener('ended', () => {
   }
   if (P.mode === 'audio' || P.recorded) finishPlayback();
 });
-audio.addEventListener('error', () => {
+audio.addEventListener('error', async () => {
   if (!P || !audio.getAttribute('src')) return;
-  const offline = !navigator.onLine;
-  toast(offline ? 'Diese Übung ist offline noch nicht verfügbar.' : 'Die Audiodatei konnte nicht geladen werden. Stimmt der Pfad in content.json?');
+  const src = (audio.currentSrc || audio.src).split('#')[0];
   teardown(); hidePlayer();
+  toast(await diagnoseAudio(src), 9000);
 });
+
+/** Findet heraus, warum eine Audiodatei nicht lädt, und formuliert eine verständliche Meldung. */
+async function diagnoseAudio(url) {
+  if (!navigator.onLine) return 'Diese Übung ist offline noch nicht verfügbar.';
+  const drive = /googleapis\.com\/drive\//.test(url);
+  try {
+    const r = await fetch(url, { headers: { Range: 'bytes=0-1' } });
+    if (r.ok) {
+      return drive
+        ? 'Die Datei ist erreichbar, aber der Player darf sie nicht laden. Entferne in der Google Cloud Console die Website-Einschränkung des API-Schlüssels (die Einschränkung auf die Drive API bleibt).'
+        : 'Die Datei ist erreichbar, aber das Format wird nicht unterstützt. Verwende MP3 oder M4A.';
+    }
+    let msg = '';
+    try { msg = ((await r.json()).error || {}).message || ''; } catch (e) { /* kein JSON */ }
+    if (/referer|referrer/i.test(msg)) return 'Der API-Schlüssel blockiert diese Website. Prüfe in der Google Cloud Console die Website-Einschränkung des Schlüssels.';
+    if (/API key not valid/i.test(msg)) return 'Der API-Schlüssel in content.json ist ungültig.';
+    if (/has not been used|is disabled/i.test(msg)) return 'Die Google Drive API ist für den Schlüssel nicht aktiviert.';
+    if (/cannotDownload|download/i.test(msg)) return 'Google Drive erlaubt das Herunterladen dieser Datei nicht. Prüfe in der Freigabe, ob Betrachter herunterladen dürfen.';
+    if (r.status === 404) return drive ? 'Datei nicht gefunden. Ist der Drive-Ordner auf „Jeder mit dem Link“ freigegeben?' : 'Datei nicht gefunden. Stimmt der Pfad in content.json?';
+    if (r.status === 403 && /quota|rate|limit/i.test(msg)) return 'Google Drive drosselt gerade die Abrufe. Versuche es in einer Weile noch einmal.';
+    return `Audio konnte nicht geladen werden (Fehler ${r.status}${msg ? `: ${msg}` : ''}).`;
+  } catch (e) {
+    return 'Die Audiodatei konnte nicht geladen werden. Prüfe die Internetverbindung.';
+  }
+}
 
 seek.addEventListener('input', () => { if (!P) return; P.seeking = true; seek.style.setProperty('--p', `${seek.value / 10}%`); $('#p-elapsed').textContent = fmtTime(seek.value / 1000 * currentDuration()); });
 seek.addEventListener('change', () => {
